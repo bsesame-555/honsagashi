@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>本探し</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: sans-serif; background: #f5f5f0; color: #222; min-height: 100vh; padding: 2rem 1rem; }
+  h1 { font-size: 22px; font-weight: 500; margin-bottom: 0.25rem; }
+  .subtitle { font-size: 14px; color: #888; margin-bottom: 2rem; }
+  .search-box { background: #fff; border-radius: 12px; border: 0.5px solid #ddd; padding: 1.25rem; margin-bottom: 1.5rem; }
+  .search-row { display: flex; gap: 8px; }
+  input[type="text"] { flex: 1; padding: 10px 14px; border: 0.5px solid #ccc; border-radius: 8px; font-size: 15px; outline: none; }
+  input[type="text"]:focus { border-color: #888; }
+  button.search-btn { padding: 10px 20px; background: #222; color: #fff; border: none; border-radius: 8px; font-size: 15px; cursor: pointer; white-space: nowrap; }
+  button.search-btn:hover { background: #444; }
+  .location-row { margin-top: 10px; font-size: 13px; color: #888; display: flex; align-items: center; gap: 6px; }
+  .loc-dot { width: 8px; height: 8px; border-radius: 50%; background: #ccc; display: inline-block; }
+  .loc-dot.ok { background: #3a9; }
+  .results { display: flex; flex-direction: column; gap: 1rem; }
+  .section { background: #fff; border-radius: 12px; border: 0.5px solid #ddd; overflow: hidden; }
+  .section-header { padding: 12px 16px; display: flex; align-items: center; gap: 10px; border-bottom: 0.5px solid #eee; }
+  .priority { font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 20px; }
+  .p1 { background: #e8f5e9; color: #2e7d32; }
+  .p2 { background: #e3f2fd; color: #1565c0; }
+  .p3 { background: #fce4ec; color: #880e4f; }
+  .p4 { background: #fff3e0; color: #e65100; }
+  .section-title { font-size: 15px; font-weight: 500; }
+  .section-body { padding: 14px 16px; }
+  .link-btn { display: inline-block; padding: 9px 18px; border: 0.5px solid #ccc; border-radius: 8px; font-size: 14px; color: #222; text-decoration: none; background: #fafafa; margin-right: 8px; margin-bottom: 8px; }
+  .link-btn:hover { background: #f0f0f0; border-color: #999; }
+  .calil-result { font-size: 14px; }
+  .calil-result .lib-name { font-weight: 500; margin-bottom: 2px; }
+  .calil-result .status { font-size: 13px; padding: 2px 8px; border-radius: 4px; display: inline-block; }
+  .status-ok { background: #e8f5e9; color: #2e7d32; }
+  .status-ng { background: #fce4ec; color: #c62828; }
+  .status-unknown { background: #f5f5f5; color: #888; }
+  .lib-row { padding: 8px 0; border-bottom: 0.5px solid #f0f0f0; }
+  .lib-row:last-child { border-bottom: none; }
+  .loading { color: #888; font-size: 14px; padding: 8px 0; }
+  .hint { font-size: 13px; color: #aaa; padding: 4px 0; }
+  .empty { color: #bbb; font-size: 14px; text-align: center; padding: 2rem; }
+</style>
+</head>
+<body>
+
+<h1>本探し</h1>
+<p class="subtitle">書名を入力して、書店・図書館・通販をまとめて調べます</p>
+
+<div class="search-box">
+  <div class="search-row">
+    <input type="text" id="bookInput" placeholder="書名を入力（例：嫌われる勇気）" />
+    <button class="search-btn" onclick="search()">探す</button>
+  </div>
+</div>
+
+<div class="results" id="results"></div>
+
+<script>
+document.getElementById('bookInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') search();
+});
+
+function encodeQ(s) { return encodeURIComponent(s); }
+
+async function search() {
+  const q = document.getElementById('bookInput').value.trim();
+  if (!q) return;
+
+  document.getElementById('results').innerHTML = `
+    <div class="section"><div class="section-body"><p class="loading">書誌情報を検索中...</p></div></div>
+  `;
+
+  let isbn = null;
+  let bookInfo = null;
+
+  try {
+    const ndlRes = await fetch(`https://ndlsearch.ndl.go.jp/api/opensearch?title=${encodeQ(q)}&cnt=1&mediatype=1`);
+    const text = await ndlRes.text();
+    const parser = new DOMParser();
+    const xml = parser.parseFromString(text, 'text/xml');
+    const items = xml.querySelectorAll('item');
+    if (items.length > 0) {
+      const item = items[0];
+      const title = item.querySelector('title')?.textContent || q;
+      const author = item.querySelector('author')?.textContent || '';
+      const isbnEl = [...xml.querySelectorAll('identifier')].find(el => el.getAttribute('type') === 'dcndl:ISBN');
+      isbn = isbnEl ? isbnEl.textContent.replace(/-/g, '') : null;
+      bookInfo = { title, author, isbn };
+    }
+  } catch(e) {}
+
+  document.getElementById('results').innerHTML = `
+    ${bookInfo ? makeBookInfo(bookInfo) : ''}
+    ${makeSection('① e-hon（書店取り寄せ）', 'p1', ehonHTML(q, isbn))}
+    ${makeSection('② カーリル（図書館）', 'p2', calilHTML(q))}
+    ${makeSection('③ 楽天ブックス', 'p3', rakutenHTML(q))}
+    ${makeSection('④ Amazon Kindle', 'p4', kindleHTML(q))}
+  `;
+}
+
+function makeBookInfo(info) {
+  return `
+    <div class="section">
+      <div class="section-body" style="display:flex;gap:12px;align-items:center;">
+        <div>
+          <div style="font-size:16px;font-weight:500;">${info.title}</div>
+          ${info.author ? `<div style="font-size:13px;color:#888;margin-top:2px;">${info.author}</div>` : ''}
+          ${info.isbn ? `<div style="font-size:12px;color:#aaa;margin-top:2px;">ISBN: ${info.isbn}</div>` : ''}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function makeSection(title, priority, body) {
+  const [num, ...rest] = title.split('（');
+  const label = num.trim();
+  const sub = rest.length ? '（' + rest.join('（') : '';
+  return `
+    <div class="section">
+      <div class="section-header">
+        <span class="priority ${priority}">${label.replace(/[①②③④]/,'').trim() ? label.charAt(0) : label}</span>
+        <span class="section-title">${title}</span>
+      </div>
+      <div class="section-body">${body}</div>
+    </div>
+  `;
+}
+
+function calilHTML(q) {
+  const url = `https://calil.jp/search?q=${encodeQ(q)}`;
+  return `
+    <p class="hint">近くの図書館の蔵書・貸出状況を確認できます</p>
+    <a class="link-btn" href="${url}" target="_blank">カーリルで検索 →</a>
+  `;
+}
+
+function ehonHTML(q, isbn) {
+  const isbnUrl = isbn
+    ? `https://www.e-hon.ne.jp/bec/SA/Detail?refShinCode=${isbn}`
+    : null;
+  const searchUrl = `https://www.e-hon.ne.jp/bec/SA/Search?tab=normal&mode=title&keyword=${encodeQ(q)}`;
+  return `
+    <p class="hint">e-honで在庫を確認して、近くの書店で取り寄せできます</p>
+    ${isbnUrl ? `<a class="link-btn" href="${isbnUrl}" target="_blank">e-honで直接開く（ISBN）→</a>` : ''}
+    <a class="link-btn" href="${searchUrl}" target="_blank">e-honで書名検索 →</a>
+  `;
+}
+
+function rakutenHTML(q) {
+  const url = `https://books.rakuten.co.jp/search?sitem=${encodeQ(q)}`;
+  return `
+    <a class="link-btn" href="${url}" target="_blank">楽天ブックスで検索 →</a>
+  `;
+}
+
+function kindleHTML(q) {
+  const url = `https://www.amazon.co.jp/s?k=${encodeQ(q)}&i=digital-text`;
+  return `
+    <a class="link-btn" href="${url}" target="_blank">Kindleで検索 →</a>
+  `;
+}
+
+</script>
+</body>
+</html>
