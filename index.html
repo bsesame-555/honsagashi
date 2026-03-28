@@ -15,9 +15,6 @@
   input[type="text"]:focus { border-color: #888; }
   button.search-btn { padding: 10px 20px; background: #222; color: #fff; border: none; border-radius: 8px; font-size: 15px; cursor: pointer; white-space: nowrap; }
   button.search-btn:hover { background: #444; }
-  .location-row { margin-top: 10px; font-size: 13px; color: #888; display: flex; align-items: center; gap: 6px; }
-  .loc-dot { width: 8px; height: 8px; border-radius: 50%; background: #ccc; display: inline-block; }
-  .loc-dot.ok { background: #3a9; }
   .results { display: flex; flex-direction: column; gap: 1rem; }
   .section { background: #fff; border-radius: 12px; border: 0.5px solid #ddd; overflow: hidden; }
   .section-header { padding: 12px 16px; display: flex; align-items: center; gap: 10px; border-bottom: 0.5px solid #eee; }
@@ -30,17 +27,13 @@
   .section-body { padding: 14px 16px; }
   .link-btn { display: inline-block; padding: 9px 18px; border: 0.5px solid #ccc; border-radius: 8px; font-size: 14px; color: #222; text-decoration: none; background: #fafafa; margin-right: 8px; margin-bottom: 8px; }
   .link-btn:hover { background: #f0f0f0; border-color: #999; }
-  .calil-result { font-size: 14px; }
-  .calil-result .lib-name { font-weight: 500; margin-bottom: 2px; }
-  .calil-result .status { font-size: 13px; padding: 2px 8px; border-radius: 4px; display: inline-block; }
-  .status-ok { background: #e8f5e9; color: #2e7d32; }
-  .status-ng { background: #fce4ec; color: #c62828; }
-  .status-unknown { background: #f5f5f5; color: #888; }
-  .lib-row { padding: 8px 0; border-bottom: 0.5px solid #f0f0f0; }
-  .lib-row:last-child { border-bottom: none; }
+  .link-btn.primary { background: #222; color: #fff; border-color: #222; }
+  .link-btn.primary:hover { background: #444; }
   .loading { color: #888; font-size: 14px; padding: 8px 0; }
-  .hint { font-size: 13px; color: #aaa; padding: 4px 0; }
-  .empty { color: #bbb; font-size: 14px; text-align: center; padding: 2rem; }
+  .hint { font-size: 13px; color: #aaa; padding: 0 0 10px 0; }
+  .book-title { font-size: 16px; font-weight: 500; }
+  .book-author { font-size: 13px; color: #888; margin-top: 2px; }
+  .book-isbn { font-size: 12px; color: #aaa; margin-top: 2px; }
 </style>
 </head>
 <body>
@@ -58,6 +51,8 @@
 <div class="results" id="results"></div>
 
 <script>
+const CALIL_KEY = '2f3e4e759bdd7d5374e3bf29d4a36d98';
+
 document.getElementById('bookInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') search();
 });
@@ -76,13 +71,11 @@ async function search() {
   let bookInfo = null;
 
   try {
-    const ndlRes = await fetch(`https://ndlsearch.ndl.go.jp/api/opensearch?title=${encodeQ(q)}&cnt=1&mediatype=1`);
-    const text = await ndlRes.text();
-    const parser = new DOMParser();
-    const xml = parser.parseFromString(text, 'text/xml');
-    const items = xml.querySelectorAll('item');
-    if (items.length > 0) {
-      const item = items[0];
+    const res = await fetch(`https://ndlsearch.ndl.go.jp/api/opensearch?title=${encodeQ(q)}&cnt=1&mediatype=1`);
+    const text = await res.text();
+    const xml = new DOMParser().parseFromString(text, 'text/xml');
+    const item = xml.querySelector('item');
+    if (item) {
       const title = item.querySelector('title')?.textContent || q;
       const author = item.querySelector('author')?.textContent || '';
       const isbnEl = [...xml.querySelectorAll('identifier')].find(el => el.getAttribute('type') === 'dcndl:ISBN');
@@ -94,34 +87,35 @@ async function search() {
   document.getElementById('results').innerHTML = `
     ${bookInfo ? makeBookInfo(bookInfo) : ''}
     ${makeSection('① e-hon（書店取り寄せ）', 'p1', ehonHTML(q, isbn))}
-    ${makeSection('② カーリル（図書館）', 'p2', calilHTML(q))}
+    ${makeSection('② カーリル（図書館）', 'p2', '<p class="loading" id="calilLoading">図書館を検索中...</p><div id="calilResult"></div>')}
     ${makeSection('③ 楽天ブックス', 'p3', rakutenHTML(q))}
     ${makeSection('④ Amazon Kindle', 'p4', kindleHTML(q))}
   `;
+
+  if (isbn) searchCalil(isbn);
+  else {
+    document.getElementById('calilLoading').style.display = 'none';
+    document.getElementById('calilResult').innerHTML = `<a class="link-btn" href="https://calil.jp/search?q=${encodeQ(q)}" target="_blank">カーリルで検索 →</a>`;
+  }
 }
 
 function makeBookInfo(info) {
   return `
     <div class="section">
-      <div class="section-body" style="display:flex;gap:12px;align-items:center;">
-        <div>
-          <div style="font-size:16px;font-weight:500;">${info.title}</div>
-          ${info.author ? `<div style="font-size:13px;color:#888;margin-top:2px;">${info.author}</div>` : ''}
-          ${info.isbn ? `<div style="font-size:12px;color:#aaa;margin-top:2px;">ISBN: ${info.isbn}</div>` : ''}
-        </div>
+      <div class="section-body">
+        <div class="book-title">${info.title}</div>
+        ${info.author ? `<div class="book-author">${info.author}</div>` : ''}
+        ${info.isbn ? `<div class="book-isbn">ISBN: ${info.isbn}</div>` : ''}
       </div>
     </div>
   `;
 }
 
 function makeSection(title, priority, body) {
-  const [num, ...rest] = title.split('（');
-  const label = num.trim();
-  const sub = rest.length ? '（' + rest.join('（') : '';
   return `
     <div class="section">
       <div class="section-header">
-        <span class="priority ${priority}">${label.replace(/[①②③④]/,'').trim() ? label.charAt(0) : label}</span>
+        <span class="priority ${priority}">${title.charAt(0)}</span>
         <span class="section-title">${title}</span>
       </div>
       <div class="section-body">${body}</div>
@@ -129,40 +123,102 @@ function makeSection(title, priority, body) {
   `;
 }
 
-function calilHTML(q) {
-  const url = `https://calil.jp/search?q=${encodeQ(q)}`;
-  return `
-    <p class="hint">近くの図書館の蔵書・貸出状況を確認できます</p>
-    <a class="link-btn" href="${url}" target="_blank">カーリルで検索 →</a>
-  `;
-}
-
 function ehonHTML(q, isbn) {
-  const isbnUrl = isbn
-    ? `https://www.e-hon.ne.jp/bec/SA/Detail?refShinCode=${isbn}`
-    : null;
+  const isbnUrl = isbn ? `https://www.e-hon.ne.jp/bec/SA/Detail?refShinCode=${isbn}` : null;
   const searchUrl = `https://www.e-hon.ne.jp/bec/SA/Search?tab=normal&mode=title&keyword=${encodeQ(q)}`;
   return `
-    <p class="hint">e-honで在庫を確認して、近くの書店で取り寄せできます</p>
-    ${isbnUrl ? `<a class="link-btn" href="${isbnUrl}" target="_blank">e-honで直接開く（ISBN）→</a>` : ''}
+    <p class="hint">e-honで在庫確認→近くの書店で取り寄せ</p>
+    ${isbnUrl ? `<a class="link-btn primary" href="${isbnUrl}" target="_blank">e-honで直接開く →</a>` : ''}
     <a class="link-btn" href="${searchUrl}" target="_blank">e-honで書名検索 →</a>
   `;
 }
 
 function rakutenHTML(q) {
-  const url = `https://books.rakuten.co.jp/search?sitem=${encodeQ(q)}`;
-  return `
-    <a class="link-btn" href="${url}" target="_blank">楽天ブックスで検索 →</a>
-  `;
+  return `<a class="link-btn" href="https://books.rakuten.co.jp/search?sitem=${encodeQ(q)}" target="_blank">楽天ブックスで検索 →</a>`;
 }
 
 function kindleHTML(q) {
-  const url = `https://www.amazon.co.jp/s?k=${encodeQ(q)}&i=digital-text`;
-  return `
-    <a class="link-btn" href="${url}" target="_blank">Kindleで検索 →</a>
-  `;
+  return `<a class="link-btn" href="https://www.amazon.co.jp/s?k=${encodeQ(q)}&i=digital-text" target="_blank">Kindleで検索 →</a>`;
 }
 
+let pollCount = 0;
+function searchCalil(isbn) {
+  pollCount = 0;
+  navigator.geolocation.getCurrentPosition(pos => {
+    const lat = pos.coords.latitude;
+    const lng = pos.coords.longitude;
+    const apiUrl = `https://api.calil.jp/library?appkey=${CALIL_KEY}&lat=${lat}&lng=${lng}&limit=5&callback=calilLibCallback`;
+    window.calilLibCallback = function(libs) {
+      if (!libs || libs.length === 0) {
+        document.getElementById('calilLoading').textContent = '近くの図書館が見つかりませんでした';
+        return;
+      }
+      const systemids = [...new Set(libs.map(l => l.systemid))].join(',');
+      window.calilLibs = libs;
+      loadScript(`https://api.calil.jp/check?appkey=${CALIL_KEY}&isbn=${isbn}&systemid=${systemids}&format=json&callback=calilCheckCallback`);
+    };
+    loadScript(apiUrl);
+  }, () => {
+    document.getElementById('calilLoading').style.display = 'none';
+    document.getElementById('calilResult').innerHTML = `<a class="link-btn" href="https://calil.jp/book/${isbn}" target="_blank">カーリルで確認 →</a>`;
+  });
+}
+
+window.calilCheckCallback = function(data) {
+  document.getElementById('calilLoading').style.display = 'none';
+  if (data.continue == 1) {
+    document.getElementById('calilResult').innerHTML = '<p class="loading">蔵書を確認中...</p>';
+    setTimeout(() => pollCalil(data.session), 2000);
+  } else {
+    renderCalil(data);
+  }
+};
+
+function pollCalil(session) {
+  pollCount++;
+  if (pollCount > 10) { renderCalil(null); return; }
+  const cb = 'calilPoll_' + pollCount;
+  window[cb] = function(data) {
+    if (data.continue == 1) setTimeout(() => pollCalil(data.session), 2000);
+    else renderCalil(data);
+  };
+  loadScript(`https://api.calil.jp/check?appkey=${CALIL_KEY}&session=${session}&format=json&callback=${cb}`);
+}
+
+function renderCalil(data) {
+  const container = document.getElementById('calilResult');
+  const libs = window.calilLibs || [];
+  if (!data || !data.books || data.books.length === 0) {
+    container.innerHTML = '<p class="hint">蔵書情報を取得できませんでした</p>';
+    return;
+  }
+  const book = data.books[0];
+  let html = '';
+  libs.forEach(lib => {
+    const sysid = lib.systemid;
+    const libid = lib.libid;
+    if (!book[sysid]) return;
+    const libData = book[sysid];
+    const avail = libData.libkey && libData.libkey[libid];
+    let statusText = '不明', statusStyle = 'background:#f5f5f5;color:#888;';
+    if (avail === '貸出可' || avail === '蔵書あり') { statusText = avail; statusStyle = 'background:#e8f5e9;color:#2e7d32;'; }
+    else if (avail) { statusText = avail; statusStyle = 'background:#fce4ec;color:#c62828;'; }
+    else if (libData.status === 'Error') { statusText = '蔵書なし'; statusStyle = 'background:#fce4ec;color:#c62828;'; }
+    const reserveUrl = libData.reserveurl || `https://calil.jp/book/${document.getElementById('bookInput').value}`;
+    html += `<div style="padding:8px 0;border-bottom:0.5px solid #f0f0f0;">
+      <div style="font-weight:500;font-size:14px;">${lib.formal}</div>
+      <span style="font-size:12px;padding:2px 8px;border-radius:4px;${statusStyle}">${statusText}</span>
+      ${statusText === '貸出可' || statusText === '蔵書あり' ? `<a href="${reserveUrl}" target="_blank" style="font-size:12px;color:#1565c0;margin-left:8px;">予約 →</a>` : ''}
+    </div>`;
+  });
+  container.innerHTML = html || '<p class="hint">近くの図書館に蔵書がありませんでした</p>';
+}
+
+function loadScript(url) {
+  const s = document.createElement('script');
+  s.src = url;
+  document.body.appendChild(s);
+}
 </script>
 </body>
 </html>
